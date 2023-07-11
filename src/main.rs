@@ -1,10 +1,11 @@
-use std::io::prelude::*;
 use std::fs::File;
 use std::fs::read_dir;
 use std::fs::metadata;
 use std::path::PathBuf;
 use clap::Parser;
 use colored::Colorize;
+
+use std::io::Read;
 
 
 #[derive(Parser)]
@@ -13,6 +14,9 @@ use colored::Colorize;
 struct Args {
     /// Path of the files to be displayed
     path: PathBuf,
+
+    #[arg(short, long, default_value_t=false)]
+    recursive: bool,
 
     /// Format of size. I.e.: MB, KB, GB, B
     #[arg(short, long, default_value_t=String::from("B"))]
@@ -31,14 +35,21 @@ struct SizeMeasure {
     acronym: String
 }
 
+struct FinalInfo {
+    num_files: u64,
+    total_size: usize
+}
+
+static mut FINAL_INFO: FinalInfo = FinalInfo{num_files: 0, total_size: 0};
 
 fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
     let size_measure = get_size_measure(args.format);
 
-    let files_data = process_path(args.path, &size_measure)?;
-    print_files_info(files_data, size_measure.acronym);
+    let files_data = process_path(args.path, &size_measure, args.recursive)?;
+    print_files_info(files_data, size_measure.acronym.clone());
+    print_total_info(size_measure.acronym);
     return Ok(());
 }
 
@@ -52,16 +63,30 @@ fn get_size_measure(format: String) -> SizeMeasure {
     }
 }
 
-fn process_path(path: PathBuf, size_measure: &SizeMeasure) -> Result<Vec<FileData>, std::io::Error> {
+fn process_path(path: PathBuf, size_measure: &SizeMeasure, recursive: bool) -> Result<Vec<FileData>, std::io::Error> {
     let mut files_info = Vec::new();
-    // let path_metadata = metadata(&path);
     match metadata(&path) {
         Ok(path_metadata) => {
             if path_metadata.is_dir() {
                 let paths = read_dir(path).unwrap();
                 for p in paths {
                     if p.as_ref().unwrap().metadata().unwrap().is_file() {
-                        files_info.push(get_file_info(p.unwrap().path(), size_measure));
+                        
+                        print!("\r\t{file}",  file = p.as_ref().unwrap().path().display().to_string());
+                        let file_info = get_file_info(p.unwrap().path(), size_measure);
+
+                        unsafe {
+                            print!(" {}", FINAL_INFO.num_files);
+                            FINAL_INFO.total_size += file_info.size;
+                            FINAL_INFO.num_files +=1;
+                        }
+
+                        files_info.push(file_info);
+                    } else if recursive {
+                        println!("\r{}", p.as_ref().unwrap().path().display().to_string());
+                        if let Ok(mut recursive_sizes) = process_path(p.unwrap().path(), size_measure, recursive) {
+                            files_info.append(&mut recursive_sizes);
+                        }
                     }
                 }
             } else {
@@ -90,6 +115,16 @@ fn get_file_size(file_path: &PathBuf, size_measure: f32) -> usize{
 fn print_files_info(files_data: Vec<FileData>, format: String) {
     for fd in &files_data {
         println!("{0}   {1} {2}", fd.path.red(), fd.size, format);
+    }
+}
+
+fn print_total_info(format: String) {
+    println!("-- Total --");
+    unsafe {
+    let text1 = format!("Files number: {0}", FINAL_INFO.num_files).blue();
+    println!("{}", text1);
+    let text2 = format!("Total size:   {0}{1}", FINAL_INFO.total_size, format).blue();
+    println!("{}", text2);
     }
 }
 
