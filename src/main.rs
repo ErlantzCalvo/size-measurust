@@ -1,6 +1,23 @@
 use std::io::prelude::*;
 use std::fs::File;
-use std::env;
+use std::fs::read_dir;
+use std::fs::metadata;
+use std::path::PathBuf;
+use clap::Parser;
+use colored::Colorize;
+
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+#[clap(author="Erlantz Calvo", version, about="A Very simple file size displayer")]
+struct Args {
+    /// Path of the files to be displayed
+    path: PathBuf,
+
+    /// Format of size. I.e.: MB, KB, GB, B
+    #[arg(short, long, default_value_t=String::from("B"))]
+    format: String
+}
 
 #[derive(Debug)]
 struct FileData {
@@ -9,79 +26,78 @@ struct FileData {
 }
 
 
-struct SizeMeasure;
-
-impl SizeMeasure {
-    pub const B: f32  = 10e0;
-    pub const KB: f32 = 10e3;
-    pub const MB: f32 = 10e6;
-    pub const GB: f32 = 10e9;
+struct SizeMeasure {
+    value: f32,
+    acronym: String
 }
 
-fn main() -> std::io::Result<()> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 || args.contains(&"--help".to_string()) || args.contains(&"-h".to_string()){
-        print_help();
-        return Ok(());
-    }
 
-    let file_paths = get_file_paths(args[1..].to_vec());
-    let size_measure = get_size_measure(args);
-    let files_data = get_files_info(file_paths, size_measure);
-    println!("{:?}", files_data);
+fn main() -> std::io::Result<()> {
+    let args = Args::parse();
+
+    let size_measure = get_size_measure(args.format);
+
+    let files_data = process_path(args.path, &size_measure)?;
+    print_files_info(files_data, size_measure.acronym);
     return Ok(());
 }
 
-fn print_help() {
-    println!("Usage mode: size-measurust [OPTIONS][FILE_PATH]\n");
-    println!("Options:");
-    println!("-h, --help: Print this text showing the usage instructions");
-    println!("Example:");
-    println!("\tsize-measurust file.txt");
-}
+fn get_size_measure(format: String) -> SizeMeasure {
+    match format.to_lowercase().as_str() {
+        "k" | "K" | "kb" | "Kb" | "kB" | "KB" => return SizeMeasure{value: 1e3, acronym: "KB".to_string()},
+        "m" | "M" | "mb" | "Mb" | "mB" | "MB" => return SizeMeasure{value: 1e6, acronym: "MB".to_string()},
+        "g" | "G" | "gb" | "Gb" | "gB" | "GB" => return SizeMeasure{value: 1e9, acronym: "GB".to_string()},
+        _ => return SizeMeasure{value: 1e0, acronym: "B".to_string()}
 
-fn get_file_paths(args: Vec<String>) -> Vec<String> {
-    let mut paths = Vec::new();
-    for arg in args {
-        if arg.chars().nth(0).unwrap() != '-' {
-            paths.push(arg);
-        }
     }
-    return paths;
 }
 
-fn get_size_measure(args: Vec<String>) -> f32 {
-    for i in 0..args.len() {
-        let first_char = args[i].chars().nth(0).unwrap();
-        if first_char == '-' && args[i] == "-s".to_string(){
-            if i < args.len() -1 {
-                match args[i+1].to_lowercase().as_str() {
-                    "k" | "K" | "kb" | "Kb" | "kB" | "KB" => return SizeMeasure::KB,
-                    "m" | "M" | "mb" | "Mb" | "mB" | "MB" => return SizeMeasure::MB,
-                    "g" | "G" | "gb" | "Gb" | "gB" | "GB" => return SizeMeasure::GB,
-                    _ => return SizeMeasure::B
-                }
-            }
-            
-        }
-    }
-    return SizeMeasure::B;
-}
-
-fn get_files_info(files: Vec<String>, size_measure: f32) -> Vec<FileData> {
+fn process_path(path: PathBuf, size_measure: &SizeMeasure) -> Result<Vec<FileData>, std::io::Error> {
     let mut files_info = Vec::new();
-    for file in files {
-        let s = get_file_size(&file, size_measure);
-        let file_info = FileData{path: file.clone(), size: s};
-        files_info.push(file_info);
+    // let path_metadata = metadata(&path);
+    match metadata(&path) {
+        Ok(path_metadata) => {
+            if path_metadata.is_dir() {
+                let paths = read_dir(path).unwrap();
+                for p in paths {
+                    if p.as_ref().unwrap().metadata().unwrap().is_file() {
+                        files_info.push(get_file_info(p.unwrap().path(), size_measure));
+                    }
+                }
+            } else {
+                files_info.push(get_file_info(path, size_measure));
+            }
+            return Ok(files_info);
+        },
+        Err(error) => return Err(error)
+
     }
-    println!("{:?}", files_info);
-    return files_info;
+
 }
 
-fn get_file_size(file_path: &String, size_measure: f32) -> usize{
+fn get_file_info(path: PathBuf, size_measure: &SizeMeasure) -> FileData {
+    let s = get_file_size(&path, size_measure.value);
+    return FileData{path: path.as_path().display().to_string(), size: s};
+}
+
+fn get_file_size(file_path: &PathBuf, size_measure: f32) -> usize{
     match File::open(file_path) {
         Ok(file) => return file.bytes().count() / size_measure as usize,
         Err(_) => return 0
+    }
+}
+
+fn print_files_info(files_data: Vec<FileData>, format: String) {
+    for fd in &files_data {
+        println!("{0}   {1} {2}", fd.path.red(), fd.size, format);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn path_not_exist() {
+        let size_measure = super::get_size_measure("".to_string());
     }
 }
