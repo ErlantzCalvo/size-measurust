@@ -4,8 +4,11 @@ use std::fs::metadata;
 use std::path::PathBuf;
 use clap::Parser;
 use colored::Colorize;
-
 use std::io::Read;
+use std::time::Instant;
+use futures::executor::block_on;
+use std::thread;
+
 
 
 #[derive(Parser)]
@@ -44,12 +47,13 @@ static mut FINAL_INFO: FinalInfo = FinalInfo{num_files: 0, total_size: 0};
 
 fn main() -> std::io::Result<()> {
     let args = Args::parse();
-
+    let start_time = Instant::now();
     let size_measure = get_size_measure(args.format);
 
     let files_data = process_path(args.path, &size_measure, args.recursive)?;
+    let elapsed = start_time.elapsed();
     print_files_info(files_data, size_measure.acronym.clone());
-    print_total_info(size_measure.acronym);
+    print_total_info(size_measure.acronym, elapsed);
     return Ok(());
 }
 
@@ -83,7 +87,8 @@ fn process_path(path: PathBuf, size_measure: &SizeMeasure, recursive: bool) -> R
 
                         files_info.push(file_info);
                     } else if recursive {
-                        println!("\r{}", p.as_ref().unwrap().path().display().to_string());
+                        print!("\r{}", p.as_ref().unwrap().path().display().to_string());
+
                         if let Ok(mut recursive_sizes) = process_path(p.unwrap().path(), size_measure, recursive) {
                             files_info.append(&mut recursive_sizes);
                         }
@@ -118,13 +123,15 @@ fn print_files_info(files_data: Vec<FileData>, format: String) {
     }
 }
 
-fn print_total_info(format: String) {
+fn print_total_info(format: String, elapsed_time: std::time::Duration) {
     println!("-- Total --");
     unsafe {
     let text1 = format!("Files number: {0}", FINAL_INFO.num_files).blue();
     println!("{}", text1);
     let text2 = format!("Total size:   {0}{1}", FINAL_INFO.total_size, format).blue();
     println!("{}", text2);
+    let text3 = format!("Total time:   {0}s", elapsed_time.as_secs().to_string()).blue();
+    println!("{}", text3);
     }
 }
 
