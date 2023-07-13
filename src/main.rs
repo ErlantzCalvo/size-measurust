@@ -27,7 +27,7 @@ struct Args {
 #[derive(Debug, PartialEq)]
 struct FileData {
     path: String,
-    size: usize
+    size: f32
 }
 
 
@@ -55,25 +55,26 @@ impl SizeMeasure {
 
 struct FinalInfo {
     num_files: u64,
-    total_size: usize
+    total_size: f32
 }
 
 
-static mut FINAL_INFO: FinalInfo = FinalInfo{num_files: 0, total_size: 0};
+static mut FINAL_INFO: FinalInfo = FinalInfo{num_files: 0, total_size: 0.0};
 
 fn main() -> std::io::Result<()> {
     let args = Args::parse();
     let start_time = Instant::now();
-    let size_measure = SizeMeasure::from(args.format);
 
-    let files_data = process_path(args.path, &size_measure, args.recursive)?;
+    let files_data = process_path(args.path, args.recursive)?;
     let elapsed = start_time.elapsed();
-    print_files_info(files_data, size_measure.acronym.clone());
-    print_total_info(size_measure.acronym, elapsed);
+
+    let size_measure = SizeMeasure::from(args.format);
+    print_files_info(files_data, &size_measure);
+    print_total_info(size_measure, elapsed);
     Ok(())
 }
 
-fn process_path(path: PathBuf, size_measure: &SizeMeasure, recursive: bool) -> Result<Vec<FileData>, std::io::Error> {
+fn process_path(path: PathBuf, recursive: bool) -> Result<Vec<FileData>, std::io::Error> {
     let mut files_info = Vec::new();
     match metadata(&path) {
         Ok(path_metadata) => {
@@ -82,26 +83,23 @@ fn process_path(path: PathBuf, size_measure: &SizeMeasure, recursive: bool) -> R
                 for p in paths {
                     if p.as_ref().unwrap().metadata().unwrap().is_file() {
                         
-                        print!("\r\t{file}",  file = p.as_ref().unwrap().path().display());
-                        let file_info = get_file_info(p.unwrap().path(), size_measure);
+                        let file_info = get_file_info(p.unwrap().path());
 
                         unsafe {
-                            print!(" {}", FINAL_INFO.num_files);
+                            print!("\rFiles read: {}", FINAL_INFO.num_files);
                             FINAL_INFO.total_size += file_info.size;
                             FINAL_INFO.num_files +=1;
                         }
 
                         files_info.push(file_info);
                     } else if recursive {
-                        print!("\r{}", p.as_ref().unwrap().path().display());
-
-                        if let Ok(mut recursive_sizes) = process_path(p.unwrap().path(), size_measure, recursive) {
+                        if let Ok(mut recursive_sizes) = process_path(p.unwrap().path(), recursive) {
                             files_info.append(&mut recursive_sizes);
                         }
                     }
                 }
             } else {
-                files_info.push(get_file_info(path, size_measure));
+                files_info.push(get_file_info(path));
             }
             Ok(files_info)
         },
@@ -111,30 +109,31 @@ fn process_path(path: PathBuf, size_measure: &SizeMeasure, recursive: bool) -> R
 
 }
 
-fn get_file_info(path: PathBuf, size_measure: &SizeMeasure) -> FileData {
-    let s = get_file_size(&path, size_measure.value);
-    FileData{path: path.as_path().display().to_string(), size: s}
+fn get_file_info(path: PathBuf) -> FileData {
+    let s = get_file_size(&path);
+    FileData{path: path.as_path().display().to_string(), size: s as f32}
 }
 
-fn get_file_size(file_path: &PathBuf, size_measure: f32) -> usize{
+fn get_file_size(file_path: &PathBuf) -> usize{
     match File::open(file_path) {
-        Ok(file) => file.bytes().count() / size_measure as usize,
+        Ok(file) => file.bytes().count(),
         Err(_) => 0
     }
 }
 
-fn print_files_info(files_data: Vec<FileData>, format: String) {
+fn print_files_info(files_data: Vec<FileData>, format: &SizeMeasure) {
     for fd in &files_data {
-        println!("{0}   {1} {2}", fd.path.yellow(), fd.size, format);
+        let size = fd.size / format.value;
+        println!("{}   {:.2} {}", fd.path.yellow(), size, format.acronym);
     }
 }
 
-fn print_total_info(format: String, elapsed_time: std::time::Duration) {
+fn print_total_info(format: SizeMeasure, elapsed_time: std::time::Duration) {
     println!("-- Total --");
     unsafe {
     let text1 = format!("Files number: {0}", FINAL_INFO.num_files).blue();
     println!("{}", text1);
-    let text2 = format!("Total size:   {0}{1}", FINAL_INFO.total_size, format).blue();
+    let text2 = format!("Total size:   {:.2}{}", FINAL_INFO.total_size / format.value, format.acronym).blue();
     println!("{}", text2);
     let text3 = format!("Total time:   {0}s", elapsed_time.as_secs()).blue();
     println!("{}", text3);
@@ -143,10 +142,11 @@ fn print_total_info(format: String, elapsed_time: std::time::Duration) {
 
 #[cfg(test)]
 mod tests {
+    use crate::SizeMeasure;
 
     #[test]
     fn format_not_specified() {
-        let size_measure = super::get_size_measure("".to_string());
+        let size_measure = SizeMeasure::from("".to_string());
         let result = super::SizeMeasure{value: 1e0, acronym: "B".to_string()};
         assert_eq!(size_measure, result);
     }
@@ -154,18 +154,18 @@ mod tests {
     #[test]
     fn format_specified() {
         {
-            let size_measure = super::get_size_measure("b".to_string());
-            let result = super::SizeMeasure{value: 1e0, acronym: "B".to_string()};
+            let size_measure = SizeMeasure::from("b".to_string());
+            let result = SizeMeasure{value: 1e0, acronym: "B".to_string()};
 
             assert_eq!(size_measure, result);
         }{
-            let size_measure = super::get_size_measure("m".to_string());
-            let result = super::SizeMeasure{value: 1e6, acronym: "MB".to_string()};
+            let size_measure = SizeMeasure::from("m".to_string());
+            let result = SizeMeasure{value: 1e6, acronym: "MB".to_string()};
 
             assert_eq!(size_measure, result);
         }{
-            let size_measure = super::get_size_measure("g".to_string());
-            let result = super::SizeMeasure{value: 1e9, acronym: "GB".to_string()};
+            let size_measure = SizeMeasure::from("g".to_string());
+            let result = SizeMeasure{value: 1e9, acronym: "GB".to_string()};
 
             assert_eq!(size_measure, result);
         }
@@ -173,8 +173,7 @@ mod tests {
     
     #[test]
     fn inexistent_path() {
-        let size_measure = super::get_size_measure("b".to_string());
-        let result = super::process_path(super::PathBuf::from("/invented/madeup/alcachofa"), &size_measure, true).map_err(|e| e.kind());
+        let result = super::process_path(super::PathBuf::from("/invented/madeup/alcachofa"), true).map_err(|e| e.kind());
 
         assert_eq!(result, Err(std::io::ErrorKind::NotFound));
     }
