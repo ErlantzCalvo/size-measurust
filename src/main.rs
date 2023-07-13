@@ -37,33 +37,40 @@ struct SizeMeasure {
     acronym: String
 }
 
+impl SizeMeasure {
+    fn new() -> Self {
+         SizeMeasure{value: 1e0, acronym: "B".to_string()}
+    }
+
+    fn from(format: String) -> Self {
+        match format.to_lowercase().as_str() {
+            "k" | "K" | "kb" | "Kb" | "kB" | "KB" => SizeMeasure{value: 1e3, acronym: "KB".to_string()},
+            "m" | "M" | "mb" | "Mb" | "mB" | "MB" => SizeMeasure{value: 1e6, acronym: "MB".to_string()},
+            "g" | "G" | "gb" | "Gb" | "gB" | "GB" => SizeMeasure{value: 1e9, acronym: "GB".to_string()},
+            _ => SizeMeasure::new()
+        }
+
+    }
+}
+
 struct FinalInfo {
     num_files: u64,
     total_size: usize
 }
+
 
 static mut FINAL_INFO: FinalInfo = FinalInfo{num_files: 0, total_size: 0};
 
 fn main() -> std::io::Result<()> {
     let args = Args::parse();
     let start_time = Instant::now();
-    let size_measure = get_size_measure(args.format);
+    let size_measure = SizeMeasure::from(args.format);
 
     let files_data = process_path(args.path, &size_measure, args.recursive)?;
     let elapsed = start_time.elapsed();
     print_files_info(files_data, size_measure.acronym.clone());
     print_total_info(size_measure.acronym, elapsed);
     Ok(())
-}
-
-fn get_size_measure(format: String) -> SizeMeasure {
-    match format.to_lowercase().as_str() {
-        "k" | "K" | "kb" | "Kb" | "kB" | "KB" => SizeMeasure{value: 1e3, acronym: "KB".to_string()},
-        "m" | "M" | "mb" | "Mb" | "mB" | "MB" => SizeMeasure{value: 1e6, acronym: "MB".to_string()},
-        "g" | "G" | "gb" | "Gb" | "gB" | "GB" => SizeMeasure{value: 1e9, acronym: "GB".to_string()},
-        _ => SizeMeasure{value: 1e0, acronym: "B".to_string()}
-
-    }
 }
 
 fn process_path(path: PathBuf, size_measure: &SizeMeasure, recursive: bool) -> Result<Vec<FileData>, std::io::Error> {
